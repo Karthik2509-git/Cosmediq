@@ -61,8 +61,63 @@ export default function DoctorDashboard() {
   const [prescriptionsList, setPrescriptionsList] = useState<any[]>([]);
   const [followUpDate, setFollowUpDate] = useState('');
 
+  // Autosave draft status state
+  const [saveStatus, setSaveStatus] = useState<'Saved' | 'Saving...' | null>(null);
+
   // Linear progress step index (0: History, 1: Note Pad, 2: Prescribe, 3: Finalize)
   const [activeStep, setActiveStep] = useState(0);
+
+  // Calculate age helper utility
+  const calculateAge = (dobString: string | Date) => {
+    const birthDate = new Date(dobString);
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const m = today.getMonth() - birthDate.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return `${age} Yrs`;
+  };
+
+  // Debounced Autosave Effect
+  useEffect(() => {
+    if (!activeAppt) return;
+    
+    setSaveStatus('Saving...');
+    const timer = setTimeout(() => {
+      const draft = {
+        diagnosis,
+        notes,
+        prescriptionsList,
+        followUpDate
+      };
+      localStorage.setItem(`cosmediq_draft_${activeAppt.id}`, JSON.stringify(draft));
+      setSaveStatus('Saved');
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, [diagnosis, notes, prescriptionsList, followUpDate, activeAppt]);
+
+  // Load Autosave draft on Patient File loaded
+  useEffect(() => {
+    if (!activeAppt) {
+      setSaveStatus(null);
+      return;
+    }
+    const savedDraft = localStorage.getItem(`cosmediq_draft_${activeAppt.id}`);
+    if (savedDraft) {
+      try {
+        const parsed = JSON.parse(savedDraft);
+        setDiagnosis(parsed.diagnosis || '');
+        setNotes(parsed.notes || '');
+        setPrescriptionsList(parsed.prescriptionsList || []);
+        setFollowUpDate(parsed.followUpDate || '');
+        setSaveStatus('Saved');
+      } catch (e) {
+        console.error('Failed to parse clinical draft');
+      }
+    }
+  }, [activeAppt]);
 
   // 1. Initial Doctor profile and Queue load
   useEffect(() => {
@@ -159,6 +214,8 @@ export default function DoctorDashboard() {
 
     if (res.success) {
       setSuccessMsg(`Consultation file for ${activeAppt.patient.user.name} successfully submitted & archived.`);
+      // Clear local storage autosave draft
+      localStorage.removeItem(`cosmediq_draft_${activeAppt.id}`);
       setActiveAppt(null); // Return workspace to calm empty state
       
       // Reload active queue
@@ -323,8 +380,48 @@ export default function DoctorDashboard() {
         {/* CENTRAL WORKSPACE CONSOLE (Three-fourths width) */}
         <div className="lg:col-span-3">
           {activeAppt ? (
-            <div className="rounded-3xl border border-border bg-card p-6 md:p-8 shadow-xl shadow-primary/5 space-y-6 text-left">
+            <div className="rounded-3xl border border-border bg-card p-6 md:p-8 shadow-xl shadow-primary/5 space-y-6 text-left relative">
               
+              {/* STICKY PATIENT CONTEXT HEADER */}
+              <div className="sticky top-[64px] z-30 bg-card border border-primary/20 rounded-2xl p-4 shadow-md flex flex-wrap justify-between items-center gap-4 mb-6 transition-all duration-300">
+                <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs">
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase font-black tracking-wide">Active Patient</p>
+                    <p className="text-sm font-black text-foreground">{activeAppt.patient.user.name}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase font-black tracking-wide">Patient ID</p>
+                    <p className="font-semibold text-foreground">{activeAppt.patient.user.id.slice(0, 8)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase font-black tracking-wide">Vitals (Age/Gender)</p>
+                    <p className="font-semibold text-foreground">
+                      {calculateAge(activeAppt.patient.dateOfBirth)} / {activeAppt.patient.gender}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase font-black tracking-wide">Phone Contact</p>
+                    <p className="font-semibold text-foreground">{activeAppt.patient.user.phone || 'No Phone'}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase font-black tracking-wide">Complaint Today</p>
+                    <p className="font-semibold text-primary">{activeAppt.reason}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase font-black tracking-wide">Last Visit</p>
+                    <p className="font-semibold text-foreground">
+                      {patientHistory[0]?.date || 'First Visit'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase font-black tracking-wide">Queue Token</p>
+                    <p className="font-black text-primary uppercase bg-primary/5 px-2 py-0.5 rounded-md">
+                      {activeAppt.tokenNumber || 'T-00'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               {/* Active patient header info */}
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-border/80 pb-4">
                 <div className="space-y-1">
@@ -334,7 +431,14 @@ export default function DoctorDashboard() {
                     Patient ID: {activeAppt.patient.user.id.slice(0, 8)} • Phone: {activeAppt.patient.user.phone || 'No phone'}
                   </p>
                 </div>
-                <QueueStatusChip status={activeAppt.queueStatus} />
+                <div className="flex items-center gap-3">
+                  {saveStatus && (
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase bg-muted/65 px-2 py-1 rounded-md animate-pulse">
+                      {saveStatus === 'Saving...' ? 'Saving...' : 'Draft Saved'}
+                    </span>
+                  )}
+                  <QueueStatusChip status={activeAppt.queueStatus} />
+                </div>
               </div>
 
               {/* Strict Linear Clinical Steps layout navigation */}
@@ -483,6 +587,55 @@ export default function DoctorDashboard() {
                   </h3>
 
                   <div className="rounded-2xl border border-border bg-card p-5 space-y-4 text-left">
+                    {/* Smart Suggested Follow-Up Intervals */}
+                    <div className="space-y-2">
+                      <label className="text-[11px] font-bold text-foreground uppercase tracking-wider block">
+                        Auto-Suggest Follow-Up Interval
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const date = new Date();
+                            date.setDate(date.getDate() + 7);
+                            setFollowUpDate(date.toISOString().split('T')[0]);
+                          }}
+                          className="rounded-lg border border-border bg-muted/20 px-2.5 py-1.5 text-[10px] font-bold text-muted-foreground hover:text-primary hover:border-primary/20 transition-all"
+                        >
+                          7 Days (Review Consultation)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const date = new Date();
+                            date.setDate(date.getDate() + 15);
+                            setFollowUpDate(date.toISOString().split('T')[0]);
+                          }}
+                          className="rounded-lg border border-border bg-muted/20 px-2.5 py-1.5 text-[10px] font-bold text-muted-foreground hover:text-primary hover:border-primary/20 transition-all"
+                        >
+                          15 Days (Acne / Peels)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const date = new Date();
+                            date.setDate(date.getDate() + 30);
+                            setFollowUpDate(date.toISOString().split('T')[0]);
+                          }}
+                          className="rounded-lg border border-border bg-muted/20 px-2.5 py-1.5 text-[10px] font-bold text-muted-foreground hover:text-primary hover:border-primary/20 transition-all"
+                        >
+                          30 Days (Active Treatment Course)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFollowUpDate('')}
+                          className="rounded-lg border border-border bg-muted/20 px-2.5 py-1.5 text-[10px] font-bold text-muted-foreground hover:text-primary hover:border-primary/20 transition-all"
+                        >
+                          Manual / Clear
+                        </button>
+                      </div>
+                    </div>
+
                     <div className="space-y-1">
                       <label className="text-[11px] font-bold text-foreground uppercase tracking-wider block">
                         Schedule next visit (Optional)
