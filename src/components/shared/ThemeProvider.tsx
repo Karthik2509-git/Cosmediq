@@ -39,14 +39,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Prevent flash or hydration mismatch by returning a simple layout placeholder on server side
-  if (!mounted) {
-    return <div style={{ visibility: 'hidden' }}>{children}</div>;
-  }
-
   return (
     <ThemeContext.Provider value={{ theme, toggleTheme }}>
-      {children}
+      <div className={!mounted ? 'invisible' : ''}>
+        {children}
+      </div>
     </ThemeContext.Provider>
   );
 }
