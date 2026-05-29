@@ -61,3 +61,18 @@ export async function toggleDoctorAvailabilityAction(
     return { success: false, error: 'Failed to update schedule status.' };
   }
 }
+
+export async function fetchDoctorProfileByUserId(userId: string) {
+  try {
+    const profile = await db.doctorProfile.findUnique({
+      where: { userId },
+      include: {
+        user: true,
+      },
+    });
+    return { success: true, profile };
+  } catch (error) {
+    console.error('❌ Fetch doctor profile error:', error);
+    return { success: false, error: 'Database query failure.' };
+  }
+}
