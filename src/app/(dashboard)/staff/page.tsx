@@ -21,6 +21,8 @@ import { GlobalQuickSearch } from '@/components/dashboard/GlobalQuickSearch';
 import { QueueStatusChip } from '@/components/dashboard/QueueStatusChip';
 import { PatientHistoryTimeline } from '@/components/dashboard/PatientHistoryTimeline';
 import { TreatmentProgressTracker } from '@/components/dashboard/TreatmentProgressTracker';
+import { SkeletonLoader } from '@/components/dashboard/SkeletonLoader';
+import { PremiumEmptyState } from '@/components/dashboard/PremiumEmptyState';
 import { 
   Calendar, 
   Users, 
@@ -522,9 +524,7 @@ export default function StaffDashboard() {
             </h3>
 
             {loadingQueue ? (
-              <div className="py-12 flex justify-center items-center">
-                <Loader2 className="h-6 w-6 animate-spin text-primary" />
-              </div>
+              <SkeletonLoader variant="list" className="py-2" />
             ) : queue.length > 0 ? (
               <div className="relative border-l border-border pl-6 ml-3 space-y-6 text-left">
                 {queue.map((appt) => {
@@ -597,13 +597,11 @@ export default function StaffDashboard() {
                 })}
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center p-8 text-center rounded-2xl border border-dashed border-border bg-muted/10">
-                <ShieldCheck className="h-10 w-10 text-muted-foreground/30 mb-3" />
-                <p className="text-sm font-bold text-foreground">No appointments scheduled today.</p>
-                <p className="text-xs text-muted-foreground mt-1 max-w-sm">
-                  Register walk-in patients or book a slot from the persistent quick action HUD to begin the live queue.
-                </p>
-              </div>
+              <PremiumEmptyState 
+                variant="appointments" 
+                title="Your schedule is clear for now" 
+                description="No appointments scheduled today. Register walk-in patients or book slots from the persistent header HUD to begin the live queue."
+              />
             )}
           </div>
         </div>
@@ -781,9 +779,7 @@ export default function StaffDashboard() {
                   <hr className="border-border" />
 
                   {loadingHistory ? (
-                    <div className="py-8 flex justify-center items-center">
-                      <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                    </div>
+                    <SkeletonLoader variant="list" className="py-2" />
                   ) : (
                     <>
                       <TreatmentProgressTracker 
@@ -1016,7 +1012,7 @@ export default function StaffDashboard() {
                         </h4>
                         
                         {loadingInvoices ? (
-                          <div className="py-4 flex justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+                          <SkeletonLoader variant="invoices" />
                         ) : invoices.length > 0 ? (
                           <div className="space-y-2">
                             {invoices.map((inv) => (
@@ -1091,7 +1087,7 @@ export default function StaffDashboard() {
                       </div>
 
                       {loadingInvoices ? (
-                        <div className="py-12 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+                        <SkeletonLoader variant="invoices" />
                       ) : (
                         <div className="space-y-2">
                           {invoices

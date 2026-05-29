@@ -18,6 +18,8 @@ import { PatientHistoryTimeline } from '@/components/dashboard/PatientHistoryTim
 import { PrescriptionBuilder } from '@/components/dashboard/PrescriptionBuilder';
 import { TreatmentProgressTracker } from '@/components/dashboard/TreatmentProgressTracker';
 import { MotivationalQuote } from '@/components/shared/MotivationalQuote';
+import { SkeletonLoader } from '@/components/dashboard/SkeletonLoader';
+import { PremiumEmptyState } from '@/components/dashboard/PremiumEmptyState';
 import { 
   Stethoscope, 
   Users, 
@@ -322,9 +324,7 @@ export default function DoctorDashboard() {
             </h3>
 
             {loading ? (
-              <div className="py-6 flex justify-center">
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
-              </div>
+              <SkeletonLoader variant="list" className="py-2" />
             ) : queue.length > 0 ? (
               <div className="space-y-3">
                 {queue.map((appt) => {
@@ -369,9 +369,11 @@ export default function DoctorDashboard() {
                 })}
               </div>
             ) : (
-              <div className="text-center py-6 text-xs text-muted-foreground font-semibold">
-                No active patients queued.
-              </div>
+              <PremiumEmptyState 
+                variant="appointments" 
+                title="Queue is clear" 
+                description="No patients queued today."
+              />
             )}
           </div>
 

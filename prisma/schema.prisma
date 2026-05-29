@@ -69,6 +69,7 @@ model User {
   doctorProfile  DoctorProfile?
   patientProfile PatientProfile?
   auditLogs      AuditLog[]
+  notifications  Notification[]
 }
 
 model DoctorProfile {
@@ -183,3 +184,25 @@ model AuditLog {
   ipAddress   String?
   createdAt   DateTime @default(now())
 }
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  WHATSAPP
+  IN_APP
+}
+
+model Notification {
+  id        String              @id @default(uuid())
+  userId    String
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  category  String              // "appointment", "follow-up", "payment", "doctor-leave", "announcement"
+  channel   NotificationChannel @default(IN_APP)
+  isRead    Boolean             @default(false)
+  createdAt DateTime            @default(now())
+  entityId  String?             // For duplicate prevention
+  dateKey   String?             // For date uniqueness e.g. "2026-05-30"
+}
+

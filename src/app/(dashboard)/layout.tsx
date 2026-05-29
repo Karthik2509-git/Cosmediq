@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Logo } from '@/components/shared/Logo';
 import { LogOut, UserCheck, ShieldCheck, Activity } from 'lucide-react';
 import { ThemeToggle } from '@/components/shared/ThemeToggle';
+import { NotificationBell } from '@/components/dashboard/NotificationBell';
 
 export default function DashboardLayout({
   children,
@@ -35,6 +36,7 @@ export default function DashboardLayout({
             </div>
             
             <div className="flex items-center gap-4">
+              <NotificationBell />
               <ThemeToggle />
               <button
                 onClick={handleSignOut}

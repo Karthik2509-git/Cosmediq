@@ -9,6 +9,8 @@ import { fetchPatientRecordsAction, uploadMedicalRecordAction } from '@/app/acti
 import { fetchDoctorsAction } from '@/app/actions/doctor';
 import { PatientHistoryTimeline } from '@/components/dashboard/PatientHistoryTimeline';
 import { TreatmentProgressTracker } from '@/components/dashboard/TreatmentProgressTracker';
+import { SkeletonLoader } from '@/components/dashboard/SkeletonLoader';
+import { PremiumEmptyState } from '@/components/dashboard/PremiumEmptyState';
 import { 
   Logo 
 } from '@/components/shared/Logo';
@@ -274,8 +276,12 @@ export default function PatientPortal() {
         {/* LEFT TWO-THIRDS CONTAINER */}
         <div className="lg:col-span-2 space-y-6">
           {loading ? (
-            <div className="py-12 flex justify-center">
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <SkeletonLoader variant="card" />
+                <SkeletonLoader variant="card" />
+              </div>
+              <SkeletonLoader variant="chart" />
             </div>
           ) : (
             <>
@@ -327,7 +333,7 @@ export default function PatientPortal() {
                     </h3>
                     
                     {patientHistory.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">No upcoming visits confirmed yet. Schedule a callback request on the right sidebar drawer.</p>
+                      <PremiumEmptyState variant="appointments" title="Your schedule is clear for now" description="No upcoming clinical visits scheduled yet. Request a callback on the right sidebar." />
                     ) : (
                       <div className="space-y-3">
                         {patientHistory.map((appt, idx) => (
@@ -387,7 +393,7 @@ export default function PatientPortal() {
                         ))}
                       </div>
                     ) : (
-                      <p className="text-xs text-muted-foreground text-center py-4">No scanned reports uploaded yet.</p>
+                      <PremiumEmptyState variant="reports" />
                     )}
                   </div>
                 </div>
@@ -436,7 +442,7 @@ export default function PatientPortal() {
                         ))}
                       </div>
                     ) : (
-                      <p className="text-xs text-muted-foreground text-center py-4">No invoices generated yet.</p>
+                      <PremiumEmptyState variant="general" title="No billing ledgers found" description="No generated invoices or itemized transaction details found today." />
                     )}
                   </div>
                 </div>
