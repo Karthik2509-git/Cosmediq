@@ -1,0 +1,162 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  ADMIN
+  STAFF
+  DOCTOR
+  PATIENT
+}
+
+enum AppointmentStatus {
+  REQUESTED       // Patient requested via portal
+  PENDING         // Receptionist scheduling in progress
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
+enum QueueStatus {
+  WAITING
+  CONSULTING
+  DONE
+}
+
+model Branch {
+  id        String   @id @default(uuid())
+  name      String
+  address   String
+  phone     String
+  email     String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  users        User[]
+  appointments Appointment[]
+}
+
+model User {
+  id             String    @id @default(uuid())
+  email          String    @unique
+  passwordHash   String
+  name           String
+  role           Role      @default(PATIENT)
+  phone          String?
+  avatarUrl      String?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // Branch link (for multi-branch scaling)
+  branchId  String
+  branch    Branch    @relation(fields: [branchId], references: [id])
+
+  // Profile extensions
+  doctorProfile  DoctorProfile?
+  patientProfile PatientProfile?
+  auditLogs      AuditLog[]
+}
+
+model DoctorProfile {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  specialization String
+  licenseNumber  String
+  bio            String?
+  consultFee     Float    @default(500.0)
+  experience     Int      @default(0)
+  available      Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  appointments    Appointment[]
+  medicalRecords  MedicalRecord[]
+}
+
+model PatientProfile {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dateOfBirth    DateTime
+  gender         String
+  bloodGroup     String?
+  address        String?
+  medicalHistory String?
+  emergencyPhone String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  appointments   Appointment[]
+  medicalRecords MedicalRecord[]
+}
+
+model Appointment {
+  id          String            @id @default(uuid())
+  dateTime    DateTime
+  status      AppointmentStatus @default(PENDING)
+  reason      String
+  notes       String?
+  tokenNumber String?           // Daily queue token e.g., "C-12"
+  queueStatus QueueStatus       @default(WAITING)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  // Relations
+  branchId  String
+  branch    Branch         @relation(fields: [branchId], references: [id])
+  patientId String
+  patient   PatientProfile @relation(fields: [patientId], references: [id])
+  doctorId  String
+  doctor    DoctorProfile  @relation(fields: [doctorId], references: [id])
+
+  consultation Consultation?
+}
+
+model Consultation {
+  id             String      @id @default(uuid())
+  appointmentId  String      @unique
+  appointment    Appointment @relation(fields: [appointmentId], references: [id])
+  diagnosis      String
+  notes          String?
+  prescription   Json?       // Structured drug lists & directions
+  followUpDate   DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+}
+
+model MedicalRecord {
+  id             String         @id @default(uuid())
+  patientId      String
+  patient        PatientProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctorId       String?
+  doctor         DoctorProfile? @relation(fields: [doctorId], references: [id], onDelete: SetNull)
+  fileName       String
+  fileUrl        String
+  fileType       String         // PDF, SCAN, IMAGE, PRESCRIPTION
+  fileSize       Int
+  description    String?
+  uploadedAt     DateTime       @default(now())
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String?  // Who did the action
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action      String   // E.g., "APPOINTMENT_CREATE", "PATIENT_UPDATE", "BILLING_EDIT"
+  entityType  String   // E.g., "PatientProfile", "Appointment", "Invoice"
+  entityId    String   // ID of the record modified
+  oldValue    Json?
+  newValue    Json?
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+}
