@@ -33,7 +33,8 @@ import {
   ToggleLeft,
   ToggleRight,
   ChevronRight,
-  ShieldAlert
+  ShieldAlert,
+  History as HistoryIcon
 } from 'lucide-react';
 import { QueueStatus } from '@prisma/client';
 
@@ -131,7 +132,7 @@ export default function DoctorDashboard() {
     const res = await toggleDoctorAvailabilityAction(profile.id, newAvailable, userId);
     
     if (res.success) {
-      setProfile(prev => ({ ...prev, available: newAvailable }));
+      setProfile((prev: any) => ({ ...prev, available: newAvailable }));
     } else {
       setErrorMsg('Failed to update availability status.');
     }
@@ -339,7 +340,7 @@ export default function DoctorDashboard() {
               {/* Strict Linear Clinical Steps layout navigation */}
               <div className="flex border-b border-border pb-3 gap-2 overflow-x-auto">
                 {[
-                  { label: '1. Review History', icon: History },
+                  { label: '1. Review History', icon: HistoryIcon },
                   { label: '2. Clinical Note Pad', icon: FileText },
                   { label: '3. Digital Prescription', icon: ClipboardList },
                   { label: '4. Finalize', icon: CheckCircle2 }
