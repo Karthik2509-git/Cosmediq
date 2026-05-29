@@ -144,3 +144,18 @@ export async function searchPatientsAction(query: string) {
     return { success: false, error: 'Database search failure.' };
   }
 }
+
+export async function fetchPatientProfileByUserId(userId: string) {
+  try {
+    const profile = await db.patientProfile.findUnique({
+      where: { userId },
+      include: {
+        user: true,
+      },
+    });
+    return { success: true, profile };
+  } catch (error) {
+    console.error('❌ Fetch patient profile error:', error);
+    return { success: false, error: 'Database query failure.' };
+  }
+}

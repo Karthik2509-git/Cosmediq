@@ -28,6 +28,12 @@ enum QueueStatus {
   DONE
 }
 
+enum InvoiceStatus {
+  UNPAID
+  PAID
+  PARTIALLY_PAID
+}
+
 model Branch {
   id        String   @id @default(uuid())
   name      String
@@ -97,6 +103,7 @@ model PatientProfile {
 
   appointments   Appointment[]
   medicalRecords MedicalRecord[]
+  invoices       Invoice[]
 }
 
 model Appointment {
@@ -119,6 +126,7 @@ model Appointment {
   doctor    DoctorProfile  @relation(fields: [doctorId], references: [id])
 
   consultation Consultation?
+  invoice      Invoice?
 }
 
 model Consultation {
@@ -145,6 +153,22 @@ model MedicalRecord {
   fileSize       Int
   description    String?
   uploadedAt     DateTime       @default(now())
+}
+
+model Invoice {
+  id            String        @id @default(uuid())
+  patientId     String
+  patient       PatientProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  appointmentId String?       @unique
+  appointment   Appointment?  @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  amount        Float         @default(0.0)
+  paidAmount    Float         @default(0.0)
+  status        InvoiceStatus @default(UNPAID)
+  paymentMethod String?       // CASH, CARD, UPI
+  items         Json?         // Structured itemized charges e.g. [{"name": "Consultation Fee", "price": 700}]
+  paidDate      DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 }
 
 model AuditLog {

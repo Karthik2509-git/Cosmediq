@@ -12,6 +12,11 @@ import {
 } from '@/app/actions/appointment';
 import { fetchDoctorsAction } from '@/app/actions/doctor';
 import { fetchPatientHistoryAction } from '@/app/actions/consultation';
+import { 
+  fetchInvoicesAction, 
+  createInvoiceAction, 
+  recordManualPaymentAction 
+} from '@/app/actions/billing';
 import { GlobalQuickSearch } from '@/components/dashboard/GlobalQuickSearch';
 import { QueueStatusChip } from '@/components/dashboard/QueueStatusChip';
 import { PatientHistoryTimeline } from '@/components/dashboard/PatientHistoryTimeline';
@@ -29,7 +34,11 @@ import {
   History, 
   Clock,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  CreditCard,
+  Printer,
+  FileText,
+  Trash2
 } from 'lucide-react';
 import { QueueStatus } from '@prisma/client';
 
@@ -50,8 +59,26 @@ export default function StaffDashboard() {
   const [loadingHistory, setLoadingHistory] = useState(false);
 
   // Active Right Side Console Drawer Tab (or None)
-  // 'walkin' | 'book' | 'history' | 'followup' | null
-  const [activeTab, setActiveTab] = useState<'walkin' | 'book' | 'history' | 'followup' | null>(null);
+  // 'walkin' | 'book' | 'history' | 'followup' | 'billing' | null
+  const [activeTab, setActiveTab] = useState<'walkin' | 'book' | 'history' | 'followup' | 'billing' | null>(null);
+
+  // Billing ledger states
+  const [invoices, setInvoices] = useState<any[]>([]);
+  const [loadingInvoices, setLoadingInvoices] = useState(false);
+  const [activeInvoice, setActiveInvoice] = useState<any | null>(null);
+  const [billingFilter, setBillingFilter] = useState<'ALL' | 'PAID' | 'UNPAID' | 'PARTIALLY_PAID'>('ALL');
+  
+  // Custom invoice creator states
+  const [invoiceItemName, setInvoiceItemName] = useState('Standard Consultation Fee');
+  const [invoiceItemPrice, setInvoiceItemPrice] = useState(700);
+  const [invoiceItemsList, setInvoiceItemsList] = useState<Array<{ name: string; price: number }>>([
+    { name: 'Standard Consultation Fee', price: 700 }
+  ]);
+
+  // Payment Recording State
+  const [selectedInvoiceForPayment, setSelectedInvoiceForPayment] = useState<string | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState(700);
+  const [paymentMethod, setPaymentMethod] = useState('CASH'); // CASH, CARD, UPI
 
   // Form states
   const [walkinForm, setWalkinForm] = useState({
@@ -112,13 +139,30 @@ export default function StaffDashboard() {
     setLoadingHistory(false);
   };
 
+  // 2b. Fetch Invoices Ledger
+  const loadInvoices = async (profileId?: string) => {
+    setLoadingInvoices(true);
+    setErrorMsg(null);
+    const res = await fetchInvoicesAction(profileId);
+    if (res.success && res.invoices) {
+      setInvoices(res.invoices);
+    } else {
+      setErrorMsg(res.error || 'Failed to fetch invoices.');
+    }
+    setLoadingInvoices(false);
+  };
+
   // 3. Queue Action Triggered from smart search
-  const handleSearchAction = async (patient: any, action: 'queue' | 'book' | 'history' | 'followup') => {
+  const handleSearchAction = async (patient: any, action: 'queue' | 'book' | 'history' | 'followup' | 'billing') => {
     setSelectedPatient(patient);
     
     if (action === 'history') {
       setActiveTab('history');
       await fetchHistory(patient.profileId);
+    } else if (action === 'billing') {
+      setActiveTab('billing');
+      setInvoiceItemsList([{ name: 'Standard Consultation Fee', price: 700 }]);
+      await loadInvoices(patient.profileId);
     } else if (action === 'queue') {
       // Auto queue existing patient immediately for today
       setActionLoading(true);
@@ -158,6 +202,70 @@ export default function StaffDashboard() {
       setFollowupForm(prev => ({ ...prev, patientId: patient.profileId }));
       setActiveTab('followup');
     }
+  };
+
+  // 3b. Custom Item Helpers
+  const handleAddInvoiceItem = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!invoiceItemName.trim()) return;
+    setInvoiceItemsList(prev => [...prev, { name: invoiceItemName.trim(), price: Number(invoiceItemPrice) }]);
+    setInvoiceItemName('');
+    setInvoiceItemPrice(0);
+  };
+
+  const handleRemoveInvoiceItem = (idx: number) => {
+    setInvoiceItemsList(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  // 3c. Submit Manual Invoice
+  const handleCreateInvoiceSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPatient) {
+      setErrorMsg('Please select or search a patient record first.');
+      return;
+    }
+    setActionLoading(true);
+    setErrorMsg(null);
+
+    const totalAmount = invoiceItemsList.reduce((sum, item) => sum + item.price, 0);
+
+    const res = await createInvoiceAction({
+      patientProfileId: selectedPatient.profileId,
+      amount: totalAmount,
+      items: invoiceItemsList,
+      operatorId,
+    });
+
+    if (res.success) {
+      await loadInvoices(selectedPatient.profileId);
+      setInvoiceItemsList([{ name: 'Standard Consultation Fee', price: 700 }]);
+    } else {
+      setErrorMsg(res.error || 'Failed to create invoice.');
+    }
+    setActionLoading(false);
+  };
+
+  // 3d. Record manual payment log
+  const handleRecordPaymentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedInvoiceForPayment) return;
+    setActionLoading(true);
+    setErrorMsg(null);
+
+    const res = await recordManualPaymentAction({
+      invoiceId: selectedInvoiceForPayment,
+      paidAmount: Number(paymentAmount),
+      paymentMethod: paymentMethod,
+      operatorId,
+    });
+
+    if (res.success) {
+      await loadInvoices(selectedPatient?.profileId);
+      setSelectedInvoiceForPayment(null);
+    } else {
+      setErrorMsg(res.error || 'Failed to record manual payment.');
+    }
+    setActionLoading(false);
   };
 
   // 4. One-click queue state modifiers (WAITING -> CONSULTING -> DONE)
@@ -388,6 +496,17 @@ export default function StaffDashboard() {
         >
           <Plus className="h-4 w-4 text-primary" />
           Book Slot (Existing)
+        </button>
+        <button
+          onClick={async () => {
+            setSelectedPatient(null);
+            setActiveTab('billing');
+            await loadInvoices();
+          }}
+          className="flex items-center gap-1.5 text-xs font-bold text-foreground border border-border bg-card px-4 py-2.5 rounded-xl hover:bg-muted transition-colors"
+        >
+          <CreditCard className="h-4 w-4 text-primary" />
+          Billing & Invoices Ledger
         </button>
       </div>
 
@@ -733,6 +852,293 @@ export default function StaffDashboard() {
                 </form>
               )}
 
+              {/* TAB 5: BILLING & INVOICES LEDGER */}
+              {activeTab === 'billing' && (
+                <div className="space-y-6 text-left max-h-[600px] overflow-y-auto pr-2">
+                  <div className="space-y-1">
+                    <h3 className="text-base font-bold text-foreground flex items-center gap-1.5">
+                      <CreditCard className="h-5 w-5 text-primary" />
+                      Financial & Invoice Ledgers
+                    </h3>
+                    {selectedPatient ? (
+                      <p className="text-xs font-bold text-primary">Patient: {selectedPatient.name}</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Global Clinic Ledger Overview</p>
+                    )}
+                  </div>
+                  <hr className="border-border" />
+
+                  {/* Mode 1: Selected Patient Active Billing Console */}
+                  {selectedPatient ? (
+                    <div className="space-y-6">
+                      
+                      {/* Sub-section A: Create Manual Invoice */}
+                      <form onSubmit={handleCreateInvoiceSubmit} className="rounded-xl border border-border p-4 bg-muted/5 space-y-4">
+                        <h4 className="text-xs font-black uppercase text-foreground tracking-wider flex items-center gap-1">
+                          <Plus className="h-3.5 w-3.5 text-primary" />
+                          Generate Custom Tax Invoice
+                        </h4>
+                        
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={invoiceItemName}
+                            onChange={(e) => setInvoiceItemName(e.target.value)}
+                            className="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+                            placeholder="e.g. Chemical peeling therapy"
+                          />
+                          <input
+                            type="number"
+                            value={invoiceItemPrice}
+                            onChange={(e) => setInvoiceItemPrice(Number(e.target.value))}
+                            className="w-20 rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+                            placeholder="₹"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleAddInvoiceItem}
+                            className="px-3 py-2 rounded-xl bg-primary/10 border border-primary/20 text-primary font-bold text-xs"
+                          >
+                            Add
+                          </button>
+                        </div>
+
+                        {/* List of itemized charges added */}
+                        {invoiceItemsList.length > 0 && (
+                          <div className="rounded-lg border border-border/80 bg-card divide-y divide-border/60 text-xs">
+                            {invoiceItemsList.map((item, idx) => (
+                              <div key={idx} className="p-2 flex justify-between items-center">
+                                <span className="font-bold text-foreground truncate max-w-[150px]">{item.name}</span>
+                                <div className="flex items-center gap-2 font-black">
+                                  <span>₹{item.price}</span>
+                                  {invoiceItemsList.length > 1 && (
+                                    <button 
+                                      type="button" 
+                                      onClick={() => handleRemoveInvoiceItem(idx)}
+                                      className="text-destructive hover:text-destructive/85"
+                                    >
+                                      ✕
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                            <div className="p-2 bg-muted/10 flex justify-between items-center font-black border-t border-border">
+                              <span>Total Calculated:</span>
+                              <span>₹{invoiceItemsList.reduce((sum, i) => sum + i.price, 0)}</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Presets */}
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {[
+                            { name: 'Standard Consultation Fee', price: 700 },
+                            { name: 'Laser Skincare Therapy', price: 3500 },
+                            { name: 'Chemical Barrier Peel', price: 1800 }
+                          ].map((preset, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => {
+                                setInvoiceItemsList(prev => [...prev, preset]);
+                              }}
+                              className="text-[10px] font-bold text-muted-foreground hover:text-primary border border-border px-2.5 py-1 rounded-lg hover:border-primary/20 transition-all"
+                            >
+                              + {preset.name.split(' ')[0]} (₹{preset.price})
+                            </button>
+                          ))}
+                        </div>
+
+                        <button
+                          disabled={actionLoading}
+                          type="submit"
+                          className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-primary py-2.5 text-xs font-bold text-primary-foreground shadow-md transition-colors"
+                        >
+                          {actionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Instantly Save Invoice'}
+                        </button>
+                      </form>
+
+                      {/* Sub-section B: Record Payment Form (Dynamic inline drawer overlay) */}
+                      {selectedInvoiceForPayment && (
+                        <form onSubmit={handleRecordPaymentSubmit} className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3">
+                          <div className="flex justify-between items-center">
+                            <h4 className="text-xs font-black uppercase text-primary tracking-wider">
+                              Log Manual Payment Collection
+                            </h4>
+                            <button 
+                              type="button" 
+                              onClick={() => setSelectedInvoiceForPayment(null)} 
+                              className="text-xs text-muted-foreground hover:text-foreground font-bold"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                          
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-foreground uppercase tracking-wider block">Billed Total Pending</label>
+                            <input
+                              required
+                              type="number"
+                              value={paymentAmount}
+                              onChange={(e) => setPaymentAmount(Number(e.target.value))}
+                              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-foreground uppercase tracking-wider block">Collection Method</label>
+                            <select
+                              value={paymentMethod}
+                              onChange={(e) => setPaymentMethod(e.target.value)}
+                              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+                            >
+                              <option>CASH</option>
+                              <option>CARD</option>
+                              <option>UPI</option>
+                            </select>
+                          </div>
+
+                          <button
+                            disabled={actionLoading}
+                            type="submit"
+                            className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-primary py-2 text-xs font-bold text-primary-foreground shadow-md transition-colors"
+                          >
+                            {actionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Log Payment Collected'}
+                          </button>
+                        </form>
+                      )}
+
+                      {/* Sub-section C: Invoices List */}
+                      <div className="space-y-3">
+                        <h4 className="text-xs font-black uppercase text-foreground tracking-wider">
+                          Patient Invoice History
+                        </h4>
+                        
+                        {loadingInvoices ? (
+                          <div className="py-4 flex justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+                        ) : invoices.length > 0 ? (
+                          <div className="space-y-2">
+                            {invoices.map((inv) => (
+                              <div key={inv.id} className="rounded-xl border border-border bg-card p-3 flex justify-between items-center text-xs">
+                                <div>
+                                  <p className="font-bold text-foreground">Inv #{inv.id.slice(0, 8)}</p>
+                                  <p className="text-[10px] text-muted-foreground mt-0.5">{inv.createdAt} • {inv.reason}</p>
+                                  <span className={`inline-block text-[9px] font-black uppercase px-2 py-0.5 rounded border mt-1 ${
+                                    inv.status === 'PAID'
+                                      ? 'bg-emerald-500/5 text-emerald-600 border-emerald-500/20'
+                                      : 'bg-amber-500/5 text-amber-600 border-amber-500/20'
+                                  }`}>
+                                    {inv.status}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <div className="text-right">
+                                    <p className="font-black text-foreground">₹{inv.amount}</p>
+                                    {inv.status !== 'PAID' && (
+                                      <button
+                                        onClick={() => {
+                                          setSelectedInvoiceForPayment(inv.id);
+                                          setPaymentAmount(inv.amount - inv.paidAmount);
+                                        }}
+                                        className="text-[9px] text-primary font-bold hover:underline block mt-0.5"
+                                      >
+                                        Log Pay
+                                      </button>
+                                    )}
+                                  </div>
+                                  <button
+                                    onClick={() => setActiveInvoice(inv)}
+                                    className="p-1.5 rounded-lg border border-border text-muted-foreground hover:text-primary"
+                                    title="View Printable Receipt"
+                                  >
+                                    <Printer className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground text-center py-4">No invoices exist for this patient.</p>
+                        )}
+                      </div>
+
+                    </div>
+                  ) : (
+                    
+                    /* Mode 2: Global Clinic Invoices Ledger Overview */
+                    <div className="space-y-4">
+                      {/* Filter Toggle Chips */}
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          { id: 'ALL', label: 'All Invoices' },
+                          { id: 'PAID', label: 'Paid' },
+                          { id: 'UNPAID', label: 'Unpaid' },
+                          { id: 'PARTIALLY_PAID', label: 'Partial' }
+                        ].map((chip) => (
+                          <button
+                            key={chip.id}
+                            onClick={() => setBillingFilter(chip.id as any)}
+                            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
+                              billingFilter === chip.id
+                                ? 'bg-primary border-primary text-primary-foreground shadow-sm'
+                                : 'bg-card border-border text-muted-foreground hover:bg-muted'
+                            }`}
+                          >
+                            {chip.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {loadingInvoices ? (
+                        <div className="py-12 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+                      ) : (
+                        <div className="space-y-2">
+                          {invoices
+                            .filter(inv => billingFilter === 'ALL' || inv.status === billingFilter)
+                            .map((inv) => (
+                              <div key={inv.id} className="rounded-xl border border-border bg-card p-3.5 flex justify-between items-center text-xs hover:border-primary/20 transition-all duration-300">
+                                <div>
+                                  <p className="font-extrabold text-foreground">{inv.patientName}</p>
+                                  <p className="text-[10px] text-muted-foreground mt-0.5">ID: #{inv.id.slice(0, 8)} • Date: {inv.createdAt}</p>
+                                  <span className={`inline-block text-[9px] font-black uppercase px-2 py-0.5 rounded border mt-1.5 ${
+                                    inv.status === 'PAID'
+                                      ? 'bg-emerald-500/5 text-emerald-600 border-emerald-500/20'
+                                      : 'bg-amber-500/5 text-amber-600 border-amber-500/20'
+                                  }`}>
+                                    {inv.status}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <div className="text-right">
+                                    <p className="font-black text-foreground">₹{inv.amount}</p>
+                                    <p className="text-[10px] text-muted-foreground">Paid: ₹{inv.paidAmount}</p>
+                                  </div>
+                                  <button
+                                    onClick={() => {
+                                      setSelectedPatient({
+                                        profileId: inv.patientProfileId,
+                                        name: inv.patientName,
+                                        id: inv.patientId,
+                                        phone: 'Billed Record'
+                                      });
+                                      setActiveInvoice(inv);
+                                    }}
+                                    className="p-2 rounded-lg border border-border text-muted-foreground hover:text-primary transition-colors"
+                                    title="View Receipt"
+                                  >
+                                    <Printer className="h-4.5 w-4.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
             </div>
           ) : (
             /* Encouraging clinic placeholder */
@@ -749,6 +1155,120 @@ export default function StaffDashboard() {
         </div>
 
       </div>
+
+      {/* BRANDED PRINTABLE INVOICE MODAL (PDF-Ready layout!) */}
+      {activeInvoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-3xl border border-border bg-card p-6 md:p-8 shadow-2xl relative animate-in zoom-in-95 text-left space-y-6">
+            
+            {/* Header info */}
+            <div className="flex justify-between items-start gap-4">
+              <div className="flex items-center gap-2">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground font-black tracking-tighter">
+                  C
+                </div>
+                <span className="text-lg font-black tracking-tight text-foreground font-sans">Cosmediq</span>
+              </div>
+              <div className="text-right text-xs text-muted-foreground">
+                <h4 className="font-bold text-foreground">Cosmediq HSR Layout</h4>
+                <p>Sector 3, Bengaluru, KA 560102</p>
+                <p>Phone: +91 80 4930 2930</p>
+                <p className="font-black text-primary uppercase mt-1">ISO 9001 Certified</p>
+              </div>
+            </div>
+
+            <hr className="border-border/80" />
+
+            <div className="text-center">
+              <h2 className="text-xl font-extrabold tracking-tight text-foreground uppercase">CLINIC TAX INVOICE</h2>
+              <p className="text-[10px] text-muted-foreground font-semibold mt-0.5">Invoice ID: #{activeInvoice.id}</p>
+            </div>
+
+            {/* Patient & Doctor metadata grid */}
+            <div className="grid grid-cols-2 gap-6 text-xs border border-border rounded-xl p-4 bg-muted/10">
+              <div className="space-y-1">
+                <p className="text-[10px] text-muted-foreground uppercase font-black tracking-wide">Billed To (Patient)</p>
+                <p className="font-bold text-foreground">{selectedPatient?.name || activeInvoice.patientName}</p>
+                <p className="text-muted-foreground">Phone: {selectedPatient?.phone || 'Billed Profile'}</p>
+              </div>
+              <div className="space-y-1 text-right">
+                <p className="text-[10px] text-muted-foreground uppercase font-black tracking-wide">Consulting specialist</p>
+                <p className="font-bold text-primary">{activeInvoice.doctorName}</p>
+                <p className="text-muted-foreground">Target: {activeInvoice.reason}</p>
+                <p className="text-muted-foreground">Date: {activeInvoice.createdAt}</p>
+              </div>
+            </div>
+
+            {/* Branded Itemized table breakdown */}
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <table className="w-full text-xs text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-border bg-muted/40 text-muted-foreground font-bold">
+                    <th className="p-3">Dermatological Treatment / Procedure Service</th>
+                    <th className="p-3 text-right">Total Charge</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60 text-foreground font-medium">
+                  {activeInvoice.items && activeInvoice.items.length > 0 ? (
+                    activeInvoice.items.map((item: any, idx: number) => (
+                      <tr key={idx}>
+                        <td className="p-3 font-semibold">{item.name}</td>
+                        <td className="p-3 text-right font-bold">₹{item.price}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td className="p-3 font-semibold">Standard Dermatology Consultation Fee</td>
+                      <td className="p-3 text-right font-bold">₹{activeInvoice.amount}</td>
+                    </tr>
+                  )}
+                  <tr className="bg-muted/30 border-t border-border font-bold">
+                    <td className="p-3 text-right text-muted-foreground uppercase font-black tracking-wide">Invoice Total</td>
+                    <td className="p-3 text-right text-foreground font-black text-sm">₹{activeInvoice.amount}</td>
+                  </tr>
+                  <tr className="bg-emerald-500/5 text-emerald-600 font-bold">
+                    <td className="p-3 text-right text-emerald-600 uppercase font-black tracking-wide">Paid Amount manually</td>
+                    <td className="p-3 text-right font-black">₹{activeInvoice.paidAmount}</td>
+                  </tr>
+                  <tr className="bg-muted/10 font-bold">
+                    <td className="p-3 text-right text-muted-foreground uppercase font-black tracking-wide">Payment Status</td>
+                    <td className="p-3 text-right text-foreground uppercase tracking-wider font-extrabold">{activeInvoice.status}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            {/* Bottom info & close */}
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-4 text-[10px] text-muted-foreground">
+              <div className="flex items-center gap-1">
+                <ShieldCheck className="h-4 w-4 text-primary" />
+                <span>This document is digitally signed by Cosmediq EHR systems.</span>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => window.print()}
+                  type="button"
+                  className="rounded-lg border border-border bg-card px-4 py-2 text-xs font-bold text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
+                >
+                  <Printer className="h-4 w-4" />
+                  Print Receipt
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveInvoice(null);
+                    setSelectedInvoiceForPayment(null);
+                  }}
+                  type="button"
+                  className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:bg-primary/95 transition-colors"
+                >
+                  Close Receipt
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
 
     </div>
   );
