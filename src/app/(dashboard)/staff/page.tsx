@@ -8,7 +8,8 @@ import {
 import { 
   bookAppointmentAction, 
   updateQueueStatusAction, 
-  fetchTodayQueueAction 
+  fetchTodayQueueAction,
+  fetchStaffActivityLogsAction
 } from '@/app/actions/appointment';
 import { fetchDoctorsAction } from '@/app/actions/doctor';
 import { fetchPatientHistoryAction } from '@/app/actions/consultation';
@@ -61,8 +62,15 @@ export default function StaffDashboard() {
   const [loadingHistory, setLoadingHistory] = useState(false);
 
   // Active Right Side Console Drawer Tab (or None)
-  // 'walkin' | 'book' | 'history' | 'followup' | 'billing' | null
-  const [activeTab, setActiveTab] = useState<'walkin' | 'book' | 'history' | 'followup' | 'billing' | null>(null);
+  // 'walkin' | 'book' | 'history' | 'followup' | 'billing' | 'activity' | null
+  const [activeTab, setActiveTab] = useState<'walkin' | 'book' | 'history' | 'followup' | 'billing' | 'activity' | null>(null);
+
+  // Staff activity & shift attendance states
+  const [activityLogs, setActivityLogs] = useState<any[]>([]);
+  const [loadingActivity, setLoadingActivity] = useState(false);
+  const [attendanceCheckedIn, setAttendanceCheckedIn] = useState(false);
+  const [checkInTime, setCheckInTime] = useState<string | null>(null);
+  const [attendanceLogs, setAttendanceLogs] = useState<string[]>([]);
 
   // Billing ledger states
   const [invoices, setInvoices] = useState<any[]>([]);
@@ -131,6 +139,40 @@ export default function StaffDashboard() {
     loadData();
   }, []);
 
+  // 1b. Load Staff Attendance & Activity Logs
+  useEffect(() => {
+    async function loadLogs() {
+      if (!operatorId) return;
+
+      const cachedCheckedIn = localStorage.getItem(`cosmediq_staff_in_${operatorId}`);
+      if (cachedCheckedIn) {
+        setAttendanceCheckedIn(cachedCheckedIn === 'true');
+      }
+      
+      const cachedTime = localStorage.getItem(`cosmediq_staff_time_${operatorId}`);
+      if (cachedTime) {
+        setCheckInTime(cachedTime);
+      }
+
+      const cachedLogs = localStorage.getItem(`cosmediq_staff_logs_${operatorId}`);
+      if (cachedLogs) {
+        try {
+          setAttendanceLogs(JSON.parse(cachedLogs));
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      setLoadingActivity(true);
+      const res = await fetchStaffActivityLogsAction(operatorId);
+      if (res.success && res.logs) {
+        setActivityLogs(res.logs);
+      }
+      setLoadingActivity(false);
+    }
+    loadLogs();
+  }, [operatorId]);
+
   // 2. Fetch Selected Patient History
   const fetchHistory = async (profileId: string) => {
     setLoadingHistory(true);
@@ -152,6 +194,50 @@ export default function StaffDashboard() {
       setErrorMsg(res.error || 'Failed to fetch invoices.');
     }
     setLoadingInvoices(false);
+  };
+
+  // 2c. Reload Staff Activity Logs
+  const reloadActivityLogs = async () => {
+    if (!operatorId) return;
+    const res = await fetchStaffActivityLogsAction(operatorId);
+    if (res.success && res.logs) {
+      setActivityLogs(res.logs);
+    }
+  };
+
+  // Clock In / Clock Out Handlers
+  const handleClockIn = () => {
+    if (!operatorId) return;
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const dateStr = now.toLocaleDateString([], { day: 'numeric', month: 'short' });
+
+    setAttendanceCheckedIn(true);
+    setCheckInTime(timeStr);
+    localStorage.setItem(`cosmediq_staff_in_${operatorId}`, 'true');
+    localStorage.setItem(`cosmediq_staff_time_${operatorId}`, timeStr);
+
+    const logMsg = `Clocked In at ${timeStr} on ${dateStr}`;
+    const updated = [logMsg, ...attendanceLogs];
+    setAttendanceLogs(updated);
+    localStorage.setItem(`cosmediq_staff_logs_${operatorId}`, JSON.stringify(updated));
+  };
+
+  const handleClockOut = () => {
+    if (!operatorId) return;
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const dateStr = now.toLocaleDateString([], { day: 'numeric', month: 'short' });
+
+    setAttendanceCheckedIn(false);
+    setCheckInTime(null);
+    localStorage.setItem(`cosmediq_staff_in_${operatorId}`, 'false');
+    localStorage.removeItem(`cosmediq_staff_time_${operatorId}`);
+
+    const logMsg = `Clocked Out at ${timeStr} on ${dateStr}`;
+    const updated = [logMsg, ...attendanceLogs];
+    setAttendanceLogs(updated);
+    localStorage.setItem(`cosmediq_staff_logs_${operatorId}`, JSON.stringify(updated));
   };
 
   // 3. Queue Action Triggered from smart search
@@ -193,6 +279,7 @@ export default function StaffDashboard() {
           setQueue(qRes.queue);
         }
         setActiveTab(null);
+        await reloadActivityLogs();
       } else {
         setErrorMsg(bRes.error || 'Failed to queue patient.');
       }
@@ -241,6 +328,7 @@ export default function StaffDashboard() {
     if (res.success) {
       await loadInvoices(selectedPatient.profileId);
       setInvoiceItemsList([{ name: 'Standard Consultation Fee', price: 700 }]);
+      await reloadActivityLogs();
     } else {
       setErrorMsg(res.error || 'Failed to create invoice.');
     }
@@ -264,6 +352,7 @@ export default function StaffDashboard() {
     if (res.success) {
       await loadInvoices(selectedPatient?.profileId);
       setSelectedInvoiceForPayment(null);
+      await reloadActivityLogs();
     } else {
       setErrorMsg(res.error || 'Failed to record manual payment.');
     }
@@ -284,6 +373,7 @@ export default function StaffDashboard() {
       if (qRes.success && qRes.queue) {
         setQueue(qRes.queue);
       }
+      await reloadActivityLogs();
     } else {
       setErrorMsg(res.error || 'Failed to modify queue status.');
     }
@@ -346,6 +436,7 @@ export default function StaffDashboard() {
         doctorId: doctors[0]?.profileId || '',
       });
       setActiveTab(null);
+      await reloadActivityLogs();
     } else {
       setErrorMsg(bRes.error || 'Failed to book slot.');
     }
@@ -389,6 +480,7 @@ export default function StaffDashboard() {
         notes: '',
       });
       setActiveTab(null);
+      await reloadActivityLogs();
     } else {
       setErrorMsg(res.error || 'Failed to book appointment.');
     }
@@ -422,6 +514,7 @@ export default function StaffDashboard() {
         notes: '',
       });
       setActiveTab(null);
+      await reloadActivityLogs();
     } else {
       setErrorMsg(res.error || 'Failed to book follow-up.');
     }
@@ -502,13 +595,13 @@ export default function StaffDashboard() {
         <button
           onClick={async () => {
             setSelectedPatient(null);
-            setActiveTab('billing');
-            await loadInvoices();
+            setActiveTab('activity');
+            await reloadActivityLogs();
           }}
-          className="flex items-center gap-1.5 text-xs font-bold text-foreground border border-border bg-card px-4 py-2.5 rounded-xl hover:bg-muted transition-colors"
+          className="flex items-center gap-1.5 text-xs font-bold text-foreground border border-border bg-card px-4 py-2.5 rounded-xl hover:bg-muted transition-colors font-sans"
         >
-          <CreditCard className="h-4 w-4 text-primary" />
-          Billing & Invoices Ledger
+          <ClipboardList className="h-4 w-4 text-primary" />
+          Attendance & Activity Tracking
         </button>
       </div>
 
@@ -1132,6 +1225,116 @@ export default function StaffDashboard() {
                       )}
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* TAB 6: ATTENDANCE & SHIFT ACTIVITY TRACKING */}
+              {activeTab === 'activity' && (
+                <div className="space-y-6 text-left max-h-[600px] overflow-y-auto pr-2 animate-in fade-in">
+                  
+                  {/* Title Header */}
+                  <div className="space-y-1">
+                    <h3 className="text-base font-bold text-foreground flex items-center gap-1.5 font-sans">
+                      <ClipboardList className="h-5 w-5 text-primary" />
+                      Attendance & Shift Tracker
+                    </h3>
+                    <p className="text-xs text-muted-foreground">Manage your shift timings and view your clinical operations feed.</p>
+                  </div>
+                  <hr className="border-border" />
+
+                  {/* Shift Clock Widget */}
+                  <div className="rounded-xl border border-border p-4 bg-muted/5 space-y-4">
+                    <div className="flex justify-between items-center text-xs font-semibold">
+                      <span className="text-xs font-bold text-foreground uppercase tracking-wider block">Shift Status</span>
+                      <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded border ${
+                        attendanceCheckedIn 
+                          ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20 animate-pulse'
+                          : 'bg-amber-500/10 text-amber-600 border-amber-500/20'
+                      }`}>
+                        {attendanceCheckedIn ? 'On Shift Duty' : 'Off Shift Duty'}
+                      </span>
+                    </div>
+
+                    {attendanceCheckedIn ? (
+                      <div className="space-y-3">
+                        <p className="text-xs text-muted-foreground font-medium">
+                          Shift active since <span className="font-extrabold text-foreground">{checkInTime}</span> today.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={handleClockOut}
+                          className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-destructive py-2 text-xs font-bold text-destructive-foreground hover:bg-destructive/90 transition-colors cursor-pointer"
+                        >
+                          Clock Out / End Shift
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <p className="text-xs text-muted-foreground font-medium">
+                          You are currently clocked out. Tap below to begin recording today's clinic attendance.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={handleClockIn}
+                          className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-primary py-2 text-xs font-bold text-primary-foreground hover:bg-primary/95 transition-colors cursor-pointer"
+                        >
+                          Clock In / Start Shift
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Attendance Log History */}
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-black uppercase text-foreground tracking-wider flex items-center gap-1">
+                      <Clock className="h-3.5 w-3.5 text-primary" />
+                      Recent Attendance Logs
+                    </h4>
+                    {attendanceLogs.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic pl-1 font-medium">No attendance logged in this session.</p>
+                    ) : (
+                      <div className="space-y-1.5 max-h-[120px] overflow-y-auto pr-1">
+                        {attendanceLogs.map((log, idx) => (
+                          <div key={idx} className="p-2 rounded-lg border border-border/60 bg-card text-[10px] text-muted-foreground leading-none font-bold">
+                            {log}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <hr className="border-border" />
+
+                  {/* Operations Activity Logs Feed */}
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-black uppercase text-foreground tracking-wider flex items-center gap-1">
+                      <History className="h-3.5 w-3.5 text-primary" />
+                      Receptionist Activity Logs
+                    </h4>
+                    
+                    {loadingActivity ? (
+                      <SkeletonLoader variant="list" className="py-1" />
+                    ) : activityLogs.length > 0 ? (
+                      <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                        {activityLogs.map((log) => (
+                          <div key={log.id} className="p-2.5 rounded-xl border border-border bg-card space-y-1 text-xs">
+                            <div className="flex justify-between items-center">
+                              <span className="font-extrabold text-foreground text-[11px]">{log.action}</span>
+                              <span className="text-[9px] text-muted-foreground">{log.timeString}</span>
+                            </div>
+                            {log.details && (
+                              <p className="text-[10px] text-muted-foreground leading-tight font-medium">
+                                Target Patient: <span className="font-bold text-foreground">{log.details}</span>
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground text-center py-4 font-semibold">No recent operational activity registered.</p>
+                    )}
+                  </div>
+
                 </div>
               )}
 

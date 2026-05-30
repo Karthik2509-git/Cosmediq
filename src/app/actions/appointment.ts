@@ -177,3 +177,45 @@ export async function fetchTodayQueueAction() {
     return { success: false, error: 'Database queue fetch failure.' };
   }
 }
+
+export async function fetchStaffActivityLogsAction(operatorId: string) {
+  try {
+    const logs = await db.auditLog.findMany({
+      where: {
+        userId: operatorId,
+      },
+      take: 20,
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    const parsedLogs = logs.map((log) => {
+      let actionLabel = log.action;
+      if (log.action === 'PATIENT_REGISTER') actionLabel = 'Registered Patient';
+      else if (log.action === 'PATIENT_UPDATE') actionLabel = 'Updated Patient Details';
+      else if (log.action === 'APPOINTMENT_BOOK') actionLabel = 'Scheduled Appointment';
+      else if (log.action === 'APPOINTMENT_COMPLETE') actionLabel = 'Completed Walk-In/Consult';
+      else if (log.action === 'INVOICE_CREATE') actionLabel = 'Generated Tax Invoice';
+      else if (log.action === 'BILLING_PAYMENT_RECORD') actionLabel = 'Collected Manual Payment';
+      else if (log.action === 'QUEUE_STATUS_CHANGE') actionLabel = 'Advanced Queue Status';
+
+      const logTime = log.createdAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const logDate = log.createdAt.toLocaleDateString([], { day: 'numeric', month: 'short' });
+
+      return {
+        id: log.id,
+        action: actionLabel,
+        entityType: log.entityType,
+        entityId: log.entityId,
+        timeString: `${logTime} • ${logDate}`,
+        details: log.newValue ? (log.newValue as any).patientName || (log.newValue as any).name || '' : '',
+      };
+    });
+
+    return { success: true, logs: parsedLogs };
+  } catch (error) {
+    console.error('❌ Fetch staff logs error:', error);
+    return { success: false, error: 'Database logs query failure.' };
+  }
+}
