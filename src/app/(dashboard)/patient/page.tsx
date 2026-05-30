@@ -47,6 +47,12 @@ export default function PatientPortal() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  // Chat / contact clinic state (persisted in localStorage)
+  const [chatMessages, setChatMessages] = useState<Array<{ sender: 'patient' | 'staff' | 'doctor'; text: string; time: string }>>([
+    { sender: 'staff', text: "Hello! Sarah here from the HSR Layout Reception Desk. Let me know if you have questions about your skincare recovery or scheduled visits.", time: "10:30 AM" }
+  ]);
+  const [newChatText, setNewChatText] = useState('');
+
   // Active console tab
   // 'overview' | 'appointments' | 'medical' | 'billing'
   const [activeTab, setActiveTab] = useState<'overview' | 'appointments' | 'medical' | 'billing'>('overview');
@@ -112,6 +118,16 @@ export default function PatientPortal() {
         if (hRes.success && hRes.history) setPatientHistory(hRes.history);
         if (iRes.success && iRes.invoices) setInvoices(iRes.invoices);
         if (rRes.success && rRes.records) setRecords(rRes.records);
+
+        // Load chat history from localStorage if exists
+        const cachedChat = localStorage.getItem(`cosmediq_chat_${userId}`);
+        if (cachedChat) {
+          try {
+            setChatMessages(JSON.parse(cachedChat));
+          } catch (e) {
+            console.error('Failed to parse cached chat', e);
+          }
+        }
       }
       
       if (dRes.success && dRes.doctors) {
@@ -213,6 +229,31 @@ export default function PatientPortal() {
       setErrorMsg(res.error || 'Failed to upload report.');
     }
     setActionLoading(false);
+  };
+
+  const handleSendChatMessage = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newChatText.trim() || !userId) return;
+
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const userMsg = { sender: 'patient' as const, text: newChatText.trim(), time: timeStr };
+    
+    const updated = [...chatMessages, userMsg];
+    setChatMessages(updated);
+    localStorage.setItem(`cosmediq_chat_${userId}`, JSON.stringify(updated));
+    setNewChatText('');
+
+    // Simulate comforting response
+    setTimeout(() => {
+      const responseMsg = {
+        sender: 'staff' as const,
+        text: "Thank you for reaching out. We have logged your clinical query in our patient dashboard. Sarah the receptionist or your consulting doctor will message or call you back shortly.",
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      const finalChat = [...updated, responseMsg];
+      setChatMessages(finalChat);
+      localStorage.setItem(`cosmediq_chat_${userId}`, JSON.stringify(finalChat));
+    }, 1200);
   };
 
 
@@ -614,6 +655,52 @@ export default function PatientPortal() {
                 className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-primary/10 border border-primary/20 text-primary py-2.5 text-xs font-bold transition-colors disabled:opacity-50"
               >
                 {actionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Confirm Record Upload'}
+              </button>
+            </form>
+          </div>
+
+          {/* SECURE CLINIC CHAT / CONTACT PANEL */}
+          <div className="rounded-3xl border border-border bg-card p-6 shadow-md text-left space-y-4">
+            <h3 className="text-sm font-black text-foreground flex items-center gap-1.5 border-b border-border/60 pb-2">
+              <Heart className="h-4.5 w-4.5 text-primary" />
+              Chat / Contact Clinic
+            </h3>
+
+            {/* Message History Logs */}
+            <div className="rounded-2xl border border-border bg-muted/5 p-3 space-y-3 h-[180px] overflow-y-auto pr-1 flex flex-col justify-start">
+              {chatMessages.map((msg, idx) => {
+                const isPatient = msg.sender === 'patient';
+                return (
+                  <div key={idx} className={`max-w-[85%] rounded-2xl p-2.5 text-xs space-y-1 ${
+                    isPatient 
+                      ? 'bg-primary text-primary-foreground self-end rounded-tr-none' 
+                      : 'bg-muted/10 border border-border text-foreground self-start rounded-tl-none'
+                  }`}>
+                    <p className="leading-relaxed font-semibold">{msg.text}</p>
+                    <div className="flex justify-between items-center text-[8px] opacity-75 font-bold">
+                      <span className="capitalize">{msg.sender}</span>
+                      <span>{msg.time}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Chat Send Form */}
+            <form onSubmit={handleSendChatMessage} className="flex gap-1.5">
+              <input
+                required
+                type="text"
+                value={newChatText}
+                onChange={(e) => setNewChatText(e.target.value)}
+                className="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+                placeholder="Ask Sarah or doctor a query..."
+              />
+              <button
+                type="submit"
+                className="px-3.5 py-2 rounded-xl bg-primary text-primary-foreground font-black text-xs hover:bg-primary/95 transition-all cursor-pointer animate-pulse"
+              >
+                Send
               </button>
             </form>
           </div>
