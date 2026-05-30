@@ -66,6 +66,28 @@ export default function PatientPortal() {
     fileSize: 1024 * 1024 * 2, // 2MB mock
   });
 
+  const [selectedFileName, setSelectedFileName] = useState<string>('');
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedFileName(file.name);
+      setUploadForm(prev => ({
+        ...prev,
+        fileName: prev.fileName || file.name.replace(/\.[^/.]+$/, ""),
+        fileSize: file.size,
+        fileUrl: `/mock/scans/${file.name}`
+      }));
+      const ext = file.name.split('.').pop()?.toLowerCase();
+      if (ext === 'pdf') {
+        setUploadForm(prev => ({ ...prev, fileType: 'PDF' }));
+      } else if (['jpg', 'jpeg', 'png'].includes(ext || '')) {
+        setUploadForm(prev => ({ ...prev, fileType: 'IMAGE' }));
+      }
+    }
+  };
+
+
   // Invoice visual Modal
   const [activeInvoice, setActiveInvoice] = useState<any | null>(null);
 
@@ -156,6 +178,12 @@ export default function PatientPortal() {
     setErrorMsg(null);
     setSuccessMsg(null);
 
+    if (!selectedFileName) {
+      setErrorMsg('Please select a scan or PDF file first.');
+      setActionLoading(false);
+      return;
+    }
+
     const res = await uploadMedicalRecordAction({
       patientProfileId: profile.id,
       fileName: uploadForm.fileName,
@@ -175,6 +203,7 @@ export default function PatientPortal() {
         fileUrl: '/mock/scans/skin_barrier_test.pdf',
         fileSize: 1024 * 1024 * 2,
       });
+      setSelectedFileName('');
       // Reload uploads list
       const rRes = await fetchPatientRecordsAction(profile.id);
       if (rRes.success && rRes.records) {
@@ -185,6 +214,7 @@ export default function PatientPortal() {
     }
     setActionLoading(false);
   };
+
 
   // Calculations
   const invoicesPaid = invoices.filter(i => i.status === 'PAID');
@@ -516,6 +546,30 @@ export default function PatientPortal() {
             </h3>
             
             <form onSubmit={handleUploadSubmit} className="space-y-4">
+              {/* FILE SELECTOR BOX */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-foreground uppercase tracking-wider block">Select File</label>
+                <div 
+                  onClick={() => document.getElementById('file-upload-input')?.click()}
+                  className="w-full border-2 border-dashed border-border/85 rounded-2xl bg-muted/20 p-4 text-center cursor-pointer hover:bg-muted/40 hover:border-primary/40 transition-all flex flex-col items-center justify-center gap-1.5"
+                >
+                  <UploadCloud className="h-6 w-6 text-muted-foreground" />
+                  <span className="text-[11px] text-foreground font-semibold truncate max-w-full px-2">
+                    {selectedFileName || 'Click to select report or scan'}
+                  </span>
+                  <span className="text-[9px] text-muted-foreground">
+                    PDF, JPEG, or PNG up to 10MB
+                  </span>
+                </div>
+                <input
+                  id="file-upload-input"
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+              </div>
+
               <div className="space-y-1">
                 <label className="text-[10px] font-bold text-foreground uppercase tracking-wider block">Document Title</label>
                 <input
@@ -552,6 +606,7 @@ export default function PatientPortal() {
                   placeholder="Skincare notes about the report..."
                 />
               </div>
+
 
               <button
                 disabled={actionLoading}
