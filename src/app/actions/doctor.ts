@@ -76,3 +76,61 @@ export async function fetchDoctorProfileByUserId(userId: string) {
     return { success: false, error: 'Database query failure.' };
   }
 }
+
+export async function updateDoctorProfileAction(
+  data: {
+    profileId: string;
+    name: string;
+    phone: string;
+    specialization: string;
+    licenseNumber: string;
+    bio: string;
+    consultFee: number;
+    experience: number;
+  },
+  operatorId?: string
+) {
+  try {
+    const updatedProfile = await db.doctorProfile.update({
+      where: { id: data.profileId },
+      data: {
+        specialization: data.specialization,
+        licenseNumber: data.licenseNumber,
+        bio: data.bio,
+        consultFee: data.consultFee,
+        experience: data.experience,
+        user: {
+          update: {
+            name: data.name,
+            phone: data.phone,
+          },
+        },
+      },
+      include: {
+        user: true,
+      },
+    });
+
+    // Write Audit Log
+    await db.auditLog.create({
+      data: {
+        userId: operatorId || updatedProfile.userId,
+        action: 'DOCTOR_PROFILE_UPDATE',
+        entityType: 'DoctorProfile',
+        entityId: data.profileId,
+        newValue: {
+          name: data.name,
+          phone: data.phone,
+          specialization: data.specialization,
+          consultFee: data.consultFee,
+        },
+      },
+    });
+
+    return { success: true, profile: updatedProfile };
+  } catch (error) {
+    console.error('❌ Update doctor profile action error:', error);
+    return { success: false, error: 'Failed to update doctor profile.' };
+  }
+}
+

@@ -3,7 +3,8 @@ import React, { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import { 
   fetchDoctorProfileByUserId, 
-  toggleDoctorAvailabilityAction 
+  toggleDoctorAvailabilityAction,
+  updateDoctorProfileAction
 } from '@/app/actions/doctor';
 import { 
   fetchTodayQueueAction, 
@@ -45,12 +46,43 @@ export default function DoctorDashboard() {
   const userId = session?.user?.id;
 
   // Active state management
+  const [activeTab, setActiveTab] = useState<'queue' | 'profile' | 'schedule' | 'leaves'>('queue');
   const [profile, setProfile] = useState<any | null>(null);
   const [queue, setQueue] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // Profile form settings state
+  const [profileForm, setProfileForm] = useState({
+    name: '',
+    phone: '',
+    specialization: '',
+    licenseNumber: '',
+    bio: '',
+    consultFee: 500,
+    experience: 0,
+  });
+
+  // Availability schedule state (stored in localStorage)
+  const [weeklySchedule, setWeeklySchedule] = useState<Array<{ day: string; active: boolean; start: string; end: string }>>([
+    { day: 'Monday', active: true, start: '09:00', end: '17:00' },
+    { day: 'Tuesday', active: true, start: '09:00', end: '17:00' },
+    { day: 'Wednesday', active: true, start: '09:00', end: '17:00' },
+    { day: 'Thursday', active: true, start: '09:00', end: '17:00' },
+    { day: 'Friday', active: true, start: '09:00', end: '17:00' },
+    { day: 'Saturday', active: false, start: '09:00', end: '13:00' },
+    { day: 'Sunday', active: false, start: '09:00', end: '13:00' },
+  ]);
+
+  // Leaves and holidays state
+  const [leavesList, setLeavesList] = useState<Array<{ id: string; date: string; duration: string; reason: string; status: string }>>([]);
+  const [newLeave, setNewLeave] = useState({
+    date: '',
+    duration: 'Full Day',
+    reason: '',
+  });
 
   // Active Consultation Patient file loaded
   const [activeAppt, setActiveAppt] = useState<any | null>(null);
@@ -132,7 +164,37 @@ export default function DoctorDashboard() {
       const qRes = await fetchTodayQueueAction();
       
       if (pRes.success && pRes.profile) {
-        setProfile(pRes.profile);
+        const prof = pRes.profile;
+        setProfile(prof);
+        setProfileForm({
+          name: prof.user.name || '',
+          phone: prof.user.phone || '',
+          specialization: prof.specialization || '',
+          licenseNumber: prof.licenseNumber || '',
+          bio: prof.bio || '',
+          consultFee: prof.consultFee || 500,
+          experience: prof.experience || 0,
+        });
+
+        // Load availability schedule from localStorage if exists
+        const cachedSchedule = localStorage.getItem(`cosmediq_schedule_${userId}`);
+        if (cachedSchedule) {
+          try {
+            setWeeklySchedule(JSON.parse(cachedSchedule));
+          } catch (e) {
+            console.error('Failed to parse cached schedule', e);
+          }
+        }
+
+        // Load leaves list from localStorage if exists
+        const cachedLeaves = localStorage.getItem(`cosmediq_leaves_${userId}`);
+        if (cachedLeaves) {
+          try {
+            setLeavesList(JSON.parse(cachedLeaves));
+          } catch (e) {
+            console.error('Failed to parse cached leaves', e);
+          }
+        }
       }
       if (qRes.success && qRes.queue) {
         // Filter queue specifically for this doctor
@@ -231,6 +293,79 @@ export default function DoctorDashboard() {
     setActionLoading(false);
   };
 
+  // 5. Submit Doctor Profile update
+  const handleProfileSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile || !userId) return;
+
+    setActionLoading(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    const res = await updateDoctorProfileAction({
+      profileId: profile.id,
+      name: profileForm.name,
+      phone: profileForm.phone,
+      specialization: profileForm.specialization,
+      licenseNumber: profileForm.licenseNumber,
+      bio: profileForm.bio,
+      consultFee: profileForm.consultFee,
+      experience: profileForm.experience,
+    }, userId);
+
+    if (res.success && res.profile) {
+      setProfile(res.profile);
+      setSuccessMsg('Clinician profile settings successfully updated.');
+    } else {
+      setErrorMsg(res.error || 'Failed to update profile settings.');
+    }
+    setActionLoading(false);
+  };
+
+  // 6. Save Availability Schedule hours
+  const handleSaveSchedule = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userId) return;
+
+    localStorage.setItem(`cosmediq_schedule_${userId}`, JSON.stringify(weeklySchedule));
+    setSuccessMsg('Clinician availability schedule and hours successfully saved.');
+  };
+
+  // 7. Add Leave / Holiday schedule
+  const handleAddLeave = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userId || !newLeave.date || !newLeave.reason) return;
+
+    const leaveObj = {
+      id: crypto.randomUUID(),
+      date: newLeave.date,
+      duration: newLeave.duration,
+      reason: newLeave.reason,
+      status: 'Approved',
+    };
+
+    const updated = [...leavesList, leaveObj];
+    setLeavesList(updated);
+    localStorage.setItem(`cosmediq_leaves_${userId}`, JSON.stringify(updated));
+
+    // Reset fields
+    setNewLeave({
+      date: '',
+      duration: 'Full Day',
+      reason: '',
+    });
+    setSuccessMsg('Clinician leave/holiday registered and attendance schedule updated.');
+  };
+
+  // 8. Delete Leave day schedule
+  const handleDeleteLeave = (id: string) => {
+    if (!userId) return;
+    const updated = leavesList.filter((l) => l.id !== id);
+    setLeavesList(updated);
+    localStorage.setItem(`cosmediq_leaves_${userId}`, JSON.stringify(updated));
+    setSuccessMsg('Registered leave day removed.');
+  };
+
   // Metric counts
   const totalLoadCount = queue.length;
   const waitingCount = queue.filter(a => a.queueStatus === QueueStatus.WAITING).length;
@@ -291,8 +426,36 @@ export default function DoctorDashboard() {
         </div>
       )}
 
-      {/* PRIMARY CLINICAL HUB LAYOUT */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+      {/* 2. PORTAL TABS SELECTION */}
+      <section className="flex flex-wrap gap-2 border-b border-border pb-4">
+        {[
+          { id: 'queue', label: '1. Patient Queue & Queue Metrics', icon: Stethoscope },
+          { id: 'profile', label: '2. Profile Settings', icon: Users },
+          { id: 'schedule', label: '3. Availability Schedule', icon: Clock },
+          { id: 'leaves', label: '4. Leaves & Holidays', icon: Calendar }
+        ].map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as any)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                isActive
+                  ? 'bg-primary text-primary-foreground shadow-md shadow-primary/10'
+                  : 'bg-card text-foreground border border-border hover:bg-muted'
+              }`}
+            >
+              <Icon className="h-4 w-4" />
+              {tab.label}
+            </button>
+          );
+        })}
+      </section>
+
+      {/* TAB 1: PATIENT wait QUEUE */}
+      {activeTab === 'queue' && (
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
         
         {/* SIDEBAR QUEUE TIMELINE PANEL (One-fourth width) */}
         <div className="lg:col-span-1 space-y-6">
@@ -696,6 +859,298 @@ export default function DoctorDashboard() {
         </div>
 
       </div>
+      )}
+
+      {/* TAB 2: PROFILE SETTINGS */}
+      {activeTab === 'profile' && profile && (
+        <div className="rounded-3xl border border-border bg-card p-6 md:p-8 shadow-md text-left space-y-6 max-w-4xl mx-auto">
+          <div className="border-b border-border/60 pb-4 space-y-1">
+            <h3 className="text-lg font-black text-foreground flex items-center gap-1.5">
+              <Users className="h-5 w-5 text-primary" />
+              Clinician Profile Settings
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Update your medical background, specialization detail records, and clinical consult charges.
+            </p>
+          </div>
+
+          <form onSubmit={handleProfileSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-foreground uppercase tracking-wider block">Full Professional Name</label>
+              <input
+                required
+                type="text"
+                value={profileForm.name}
+                onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-foreground uppercase tracking-wider block">Contact Phone Number</label>
+              <input
+                required
+                type="text"
+                value={profileForm.phone}
+                onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-foreground uppercase tracking-wider block">Dermatology Specialization</label>
+              <input
+                required
+                type="text"
+                value={profileForm.specialization}
+                onChange={(e) => setProfileForm({ ...profileForm, specialization: e.target.value })}
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-foreground uppercase tracking-wider block">Medical License Number (KMC/MCI)</label>
+              <input
+                required
+                type="text"
+                value={profileForm.licenseNumber}
+                onChange={(e) => setProfileForm({ ...profileForm, licenseNumber: e.target.value })}
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-foreground uppercase tracking-wider block">Standard Consultation Fee (₹)</label>
+              <input
+                required
+                type="number"
+                value={profileForm.consultFee}
+                onChange={(e) => setProfileForm({ ...profileForm, consultFee: parseInt(e.target.value) || 0 })}
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-foreground uppercase tracking-wider block">Active Clinical Practice Experience (Years)</label>
+              <input
+                required
+                type="number"
+                value={profileForm.experience}
+                onChange={(e) => setProfileForm({ ...profileForm, experience: parseInt(e.target.value) || 0 })}
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
+
+            <div className="md:col-span-2 space-y-1">
+              <label className="text-[10px] font-bold text-foreground uppercase tracking-wider block">Professional Clinician Bio</label>
+              <textarea
+                rows={3}
+                value={profileForm.bio}
+                onChange={(e) => setProfileForm({ ...profileForm, bio: e.target.value })}
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+                placeholder="Brief biography detailing your cosmetic surgery, hair restoration, or dermal therapy practice background..."
+              />
+            </div>
+
+            <div className="md:col-span-2 flex justify-end border-t border-border/60 pt-4">
+              <button
+                disabled={actionLoading}
+                type="submit"
+                className="flex items-center justify-center gap-1.5 rounded-xl bg-primary px-6 py-2.5 text-xs font-bold text-primary-foreground shadow-md transition-colors hover:bg-primary/95 disabled:opacity-50 cursor-pointer"
+              >
+                {actionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save Profile Changes'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* TAB 3: AVAILABILITY SCHEDULE */}
+      {activeTab === 'schedule' && (
+        <div className="rounded-3xl border border-border bg-card p-6 md:p-8 shadow-md text-left space-y-6 max-w-4xl mx-auto">
+          <div className="border-b border-border/60 pb-4 space-y-1">
+            <h3 className="text-lg font-black text-foreground flex items-center gap-1.5">
+              <Clock className="h-5 w-5 text-primary" />
+              Clinician Availability Schedule & Hours
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Define your custom daily shift timings and active consultation days of the week.
+            </p>
+          </div>
+
+          <form onSubmit={handleSaveSchedule} className="space-y-6">
+            <div className="space-y-4">
+              {weeklySchedule.map((item, idx) => (
+                <div key={item.day} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 rounded-2xl border border-border bg-muted/10 gap-4">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id={`day-active-${idx}`}
+                      checked={item.active}
+                      onChange={(e) => {
+                        const updated = [...weeklySchedule];
+                        updated[idx].active = e.target.checked;
+                        setWeeklySchedule(updated);
+                      }}
+                      className="rounded border-border text-primary focus:ring-primary/20 h-4.5 w-4.5"
+                    />
+                    <label htmlFor={`day-active-${idx}`} className="text-xs font-bold text-foreground w-28 uppercase tracking-wide">
+                      {item.day}
+                    </label>
+                  </div>
+
+                  {item.active ? (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <input
+                        type="time"
+                        value={item.start}
+                        onChange={(e) => {
+                          const updated = [...weeklySchedule];
+                          updated[idx].start = e.target.value;
+                          setWeeklySchedule(updated);
+                        }}
+                        className="rounded-lg border border-border bg-background px-2.5 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/30"
+                      />
+                      <span className="text-xs text-muted-foreground font-semibold">to</span>
+                      <input
+                        type="time"
+                        value={item.end}
+                        onChange={(e) => {
+                          const updated = [...weeklySchedule];
+                          updated[idx].end = e.target.value;
+                          setWeeklySchedule(updated);
+                        }}
+                        className="rounded-lg border border-border bg-background px-2.5 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/30"
+                      />
+                    </div>
+                  ) : (
+                    <span className="text-[11px] font-bold text-muted-foreground italic tracking-wide">
+                      Closed / Not Consulting
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-end border-t border-border/60 pt-4">
+              <button
+                type="submit"
+                className="rounded-xl bg-primary px-6 py-2.5 text-xs font-bold text-primary-foreground shadow-md transition-colors hover:bg-primary/95 cursor-pointer"
+              >
+                Save Availability Shifts
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* TAB 4: LEAVES & HOLIDAYS */}
+      {activeTab === 'leaves' && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto animate-fade-in">
+          {/* New Leave Form */}
+          <div className="md:col-span-1 rounded-3xl border border-border bg-card p-6 shadow-md text-left space-y-4 h-fit">
+            <div className="border-b border-border/60 pb-3 space-y-1">
+              <h3 className="text-sm font-black text-foreground flex items-center gap-1.5">
+                <Calendar className="h-4.5 w-4.5 text-primary" />
+                Register Leave / Holiday
+              </h3>
+              <p className="text-[10px] text-muted-foreground">Mark yourself unavailable for diagnostic consultations.</p>
+            </div>
+
+            <form onSubmit={handleAddLeave} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-foreground uppercase tracking-wider block">Leave Date</label>
+                <input
+                  required
+                  type="date"
+                  value={newLeave.date}
+                  onChange={(e) => setNewLeave({ ...newLeave, date: e.target.value })}
+                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-foreground uppercase tracking-wider block">Duration</label>
+                <select
+                  value={newLeave.duration}
+                  onChange={(e) => setNewLeave({ ...newLeave, duration: e.target.value })}
+                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option>Full Day</option>
+                  <option>First Half (Morning)</option>
+                  <option>Second Half (Evening)</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-foreground uppercase tracking-wider block">Reason / Conference Name</label>
+                <input
+                  required
+                  type="text"
+                  value={newLeave.reason}
+                  onChange={(e) => setNewLeave({ ...newLeave, reason: e.target.value })}
+                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  placeholder="e.g. Skin Restoration Conference"
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-primary py-2.5 text-xs font-bold text-primary-foreground shadow-md transition-colors hover:bg-primary/95 cursor-pointer"
+              >
+                Register Leave Date
+              </button>
+            </form>
+          </div>
+
+          {/* Leaves Calendar List */}
+          <div className="md:col-span-2 rounded-3xl border border-border bg-card p-6 shadow-md text-left space-y-4">
+            <div className="border-b border-border/60 pb-3 space-y-1">
+              <h3 className="text-sm font-black text-foreground flex items-center gap-1.5">
+                <ClipboardList className="h-4.5 w-4.5 text-primary" />
+                Active Leave & Holiday Calendar
+              </h3>
+              <p className="text-[10px] text-muted-foreground">List of confirmed clinical off-days.</p>
+            </div>
+
+            {leavesList.length === 0 ? (
+              <PremiumEmptyState
+                title="No leaves registered"
+                description="Your clinical consultation attendance is fully clear. No scheduled holidays detected."
+              />
+            ) : (
+              <div className="space-y-3">
+                {leavesList.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between p-4 rounded-2xl border border-border bg-muted/10 gap-4">
+                    <div className="space-y-1 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-foreground uppercase tracking-wide">
+                          {new Date(item.date).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </span>
+                        <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[9px] font-black text-primary uppercase tracking-wide">
+                          {item.duration}
+                        </span>
+                        <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-black text-emerald-600 uppercase tracking-wide">
+                          {item.status}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">{item.reason}</p>
+                    </div>
+
+                    <button
+                      onClick={() => handleDeleteLeave(item.id)}
+                      type="button"
+                      className="rounded-lg border border-border bg-muted/20 hover:border-destructive/20 hover:text-destructive px-2.5 py-1.5 text-[10px] font-bold text-muted-foreground transition-all cursor-pointer"
+                    >
+                      Delete Schedule
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
     </div>
   );
